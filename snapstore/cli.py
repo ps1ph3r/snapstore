@@ -146,6 +146,12 @@ def cmd_restore(args: argparse.Namespace) -> Result[str, str]:
     ))
 
 
+def cmd_gui(args: argparse.Namespace) -> Result[str, str]:
+    """Launch the graphical user interface."""
+    from .gui import launch_gui
+    return attempt(lambda: launch_gui(args.directory)).map(lambda _: "")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and dispatch to command handler."""
     parser = argparse.ArgumentParser(
@@ -188,6 +194,9 @@ def main(argv: list[str] | None = None) -> int:
     p_restore.add_argument("destination", help="Destination directory")
     p_restore.add_argument("files", nargs="*", help="Specific files to restore (omit for all)")
     p_restore.set_defaults(func=cmd_restore)
+
+    p_gui = subparsers.add_parser("gui", help="Launch graphical user interface")
+    p_gui.set_defaults(func=cmd_gui)
 
     args = parser.parse_args(argv)
     if not args.command:
