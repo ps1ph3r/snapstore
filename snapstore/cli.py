@@ -9,6 +9,7 @@ from .restore import restore
 from .result import Err, Ok, Result, attempt
 from .snapshot import (
     create_snapshot,
+    delete_snapshot,
     get_history,
     get_latest_snapshot,
     get_snapshot_by_id,
@@ -32,11 +33,17 @@ def cmd_init(args: argparse.Namespace) -> Result[str, str]:
 
 def cmd_snapshot(args: argparse.Namespace) -> Result[str, str]:
     """Create a new snapshot and advance HEAD."""
+    allow_empty = getattr(args, "allow_empty", False)
     return (
         open_repo(args.directory)
-        .and_then(create_snapshot)
+        .and_then(lambda repo: create_snapshot(repo, allow_empty=allow_empty))
         .map(lambda manifest: f"Created snapshot {manifest.snapshot_id}")
     )
+
+
+def cmd_delete(args: argparse.Namespace) -> Result[str, str]:
+    """Delete a snapshot by ID and update HEAD."""
+    return open_repo(args.directory).and_then(lambda repo: delete_snapshot(repo, args.snapshot_id))
 
 
 def _format_snapshot_list(repo: Repository) -> str:
@@ -165,13 +172,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Target directory (default: current directory)",
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    subparsers = parser.add_subparsers(
+        dest="command",
+        metavar="<command>",
+    )
 
     p_init = subparsers.add_parser("init", help="Initialize a directory for snapshots")
     p_init.set_defaults(func=cmd_init)
 
     p_snapshot = subparsers.add_parser("snapshot", help="Create a snapshot")
+    p_snapshot.add_argument("--allow-empty", action="store_true", help="Create snapshot even if working tree is clean")
     p_snapshot.set_defaults(func=cmd_snapshot)
+
+    p_delete = subparsers.add_parser("delete", aliases=["rm"], help="Delete a snapshot by ID")
+    p_delete.add_argument("snapshot_id", help="Snapshot ID to delete")
+    p_delete.set_defaults(func=cmd_delete)
 
     p_list = subparsers.add_parser("list", help="List all snapshots")
     p_list.set_defaults(func=cmd_list)

@@ -1,14 +1,14 @@
 import tempfile
 from pathlib import Path
 
-from snapstore.cli import cmd_init, cmd_snapshot, cmd_status
+from snapstore.cli import cmd_delete, cmd_init, cmd_snapshot, cmd_status
 from snapstore.diff import diff_snapshots
 from snapstore.hasher import hash_content, hash_file
 from snapstore.models import Repository
 from snapstore.object_store import ObjectStore
 from snapstore.restore import restore
 from snapstore.scanner import scan_directory
-from snapstore.snapshot import create_snapshot, list_snapshots
+from snapstore.snapshot import create_snapshot, delete_snapshot, list_snapshots
 from snapstore.status import compute_status
 
 
@@ -177,3 +177,16 @@ def test_10_cli_smoke_workflow():
         status_res = cmd_status(argparse.Namespace(directory=root_str, long=False))
         assert status_res.is_ok()
         assert status_res.unwrap() == "No changes"
+
+        # 4. snapshot when clean is blocked
+        clean_snap = cmd_snapshot(argparse.Namespace(directory=root_str, allow_empty=False))
+        assert clean_snap.is_err()
+        assert "clean" in clean_snap.error
+
+        # 5. delete snapshot
+        repo = Repository(Path(root_str))
+        snap_id = repo.get_head()
+        assert snap_id is not None
+        del_res = cmd_delete(argparse.Namespace(directory=root_str, snapshot_id=snap_id))
+        assert del_res.is_ok()
+        assert repo.get_head() is None

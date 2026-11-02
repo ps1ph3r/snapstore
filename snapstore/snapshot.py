@@ -5,7 +5,7 @@ from pathlib import Path
 from .hasher import hash_file
 from .models import Repository, ScanResult, SnapshotManifest
 from .object_store import ObjectStore
-from .result import Err, Result, attempt
+from .result import Err, Ok, Result, attempt
 from .scanner import scan_directory
 
 
@@ -19,13 +19,57 @@ def _store_scanned_files(scan: ScanResult, target_dir: Path, object_store: Objec
     return files
 
 
-def create_snapshot(repo: Repository) -> Result[SnapshotManifest, str]:
+def create_snapshot(repo: Repository, allow_empty: bool = False) -> Result[SnapshotManifest, str]:
     """Create a new snapshot in the repository and advance HEAD."""
+    if not allow_empty and repo.get_head() is not None:
+        from .status import compute_status
+        match compute_status(repo):
+            case Ok(diff) if not diff:
+                return Err("Nothing to snapshot: working tree is clean")
+            case _:
+                pass
+
     return (
         create_snapshot_manifest(repo.root, repo.object_store, parent_id=repo.get_head())
         .and_then(lambda m: save_snapshot_manifest(m, repo.snapshots_dir).map(lambda _: m))
         .map(lambda m: (repo.set_head(m.snapshot_id), m)[1])
     )
+
+
+def delete_snapshot(repo: Repository, snapshot_id: str) -> Result[str, str]:
+    """Delete a snapshot manifest and update HEAD if necessary"""
+    res = get_snapshot_by_id(repo, snapshot_id)
+    if res.is_err():
+        return Err(res.unwrap_err())
+
+    target_snap = res.unwrap()
+    manifest_file = repo.snapshots_dir / f"{target_snap.snapshot_id}.json"
+
+    if not manifest_file.exists():
+        matches = list(repo.snapshots_dir.glob(f"{snapshot_id}*.json"))
+        if matches:
+            manifest_file = matches[0]
+        else:
+            return Err(f"Snapshot file for '{snapshot_id}' not found")
+
+    try:
+        manifest_file.unlink()
+    except OSError as err:
+        return Err(f"Failed to delete snapshot manifest: {err}")
+
+    # If HEAD pointed to the deleted snapshot, update HEAD
+    if repo.get_head() == target_snap.snapshot_id:
+        if target_snap.parent_id:
+            repo.set_head(target_snap.parent_id)
+        else:
+            remaining = list_snapshots(repo)
+            if remaining:
+                repo.set_head(remaining[0].snapshot_id)
+            else:
+                if repo.head_file.exists():
+                    repo.head_file.unlink()
+
+    return Ok(f"Deleted snapshot {target_snap.snapshot_id}")
 
 
 def create_snapshot_manifest(
